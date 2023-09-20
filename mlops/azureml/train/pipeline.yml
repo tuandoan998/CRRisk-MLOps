@@ -1,13 +1,13 @@
 $schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
 type: pipeline
-experiment_name: taxi-fare-training
-description: Training Pipeline to train a model that predicts taxi fare price
+experiment_name: crrisk-training
+description: Training Pipeline to train a model that predicts crrisk
 
 # <inputs_and_outputs>
 inputs:
   input: #using local data, will create an anonymous data asset
     type: uri_file
-    path: azureml:taxi-data@latest
+    path: azureml:crrisk-data@latest
 
 outputs:
   train_data:
@@ -31,16 +31,14 @@ jobs:
     code: ../../../data-science/src/prep
     command: >-
       python prep.py
-      --raw_data ${{inputs.raw_data}}
+      --data ${{inputs.data}}
       --train_data ${{outputs.train_data}}
-      --val_data ${{outputs.val_data}}
       --test_data ${{outputs.test_data}}
     environment: azureml:taxi-train-env@latest
     inputs:
-      raw_data: ${{parent.inputs.input}}
+      data: ${{parent.inputs.input}}
     outputs:
       train_data: ${{parent.outputs.train_data}}
-      val_data: ${{parent.outputs.val_data}}
       test_data: ${{parent.outputs.test_data}}
 
   train_model:
@@ -51,6 +49,7 @@ jobs:
       python train.py
       --train_data ${{inputs.train_data}}
       --model_output ${{outputs.model_output}}
+      --regression_penalty "l2"
     environment: azureml:taxi-train-env@latest
     inputs:
       train_data: ${{parent.jobs.prep_data.outputs.train_data}}
@@ -69,7 +68,7 @@ jobs:
       --evaluation_output ${{outputs.evaluation_output}}
     environment: azureml:taxi-train-env@latest
     inputs:
-      model_name: "taxi-model"
+      model_name: "crrisk-model"
       model_input: ${{parent.jobs.train_model.outputs.model_output}}
       test_data: ${{parent.jobs.prep_data.outputs.test_data}}
     outputs:
@@ -87,7 +86,7 @@ jobs:
       --model_info_output_path ${{outputs.model_info_output_path}}
     environment: azureml:taxi-train-env@latest
     inputs:
-      model_name: "taxi-model"
+      model_name: "crrisk-model"
       model_path: ${{parent.jobs.train_model.outputs.model_output}}
       evaluation_output: ${{parent.jobs.evaluate_model.outputs.evaluation_output}}
     outputs:

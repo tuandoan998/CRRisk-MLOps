@@ -5,49 +5,11 @@ Trains ML model using training dataset. Saves trained model.
 """
 
 import argparse
-
-from pathlib import Path
-
-import numpy as np
+from sklearn.linear_model import LogisticRegression
+from sklearn import metrics
+import os
 import pandas as pd
-from matplotlib import pyplot as plt
-
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
-
 import mlflow
-import mlflow.sklearn
-
-TARGET_COL = "cost"
-
-NUMERIC_COLS = [
-    "distance",
-    "dropoff_latitude",
-    "dropoff_longitude",
-    "passengers",
-    "pickup_latitude",
-    "pickup_longitude",
-    "pickup_weekday",
-    "pickup_month",
-    "pickup_monthday",
-    "pickup_hour",
-    "pickup_minute",
-    "pickup_second",
-    "dropoff_weekday",
-    "dropoff_month",
-    "dropoff_monthday",
-    "dropoff_hour",
-    "dropoff_minute",
-    "dropoff_second",
-]
-
-CAT_NOM_COLS = [
-    "store_forward",
-    "vendor",
-]
-
-CAT_ORD_COLS = [
-]
 
 
 def parse_args():
@@ -58,80 +20,62 @@ def parse_args():
     parser.add_argument("--model_output", type=str, help="Path of output model")
 
     # classifier specific arguments
-    parser.add_argument('--regressor__n_estimators', type=int, default=500,
-                        help='Number of trees')
-    parser.add_argument('--regressor__bootstrap', type=int, default=1,
-                        help='Method of selecting samples for training each tree')
-    parser.add_argument('--regressor__max_depth', type=int, default=10,
-                        help=' Maximum number of levels in tree')
-    parser.add_argument('--regressor__max_features', type=str, default='auto',
-                        help='Number of features to consider at every split')
-    parser.add_argument('--regressor__min_samples_leaf', type=int, default=4,
-                        help='Minimum number of samples required at each leaf node')
-    parser.add_argument('--regressor__min_samples_split', type=int, default=5,
-                        help='Minimum number of samples required to split a node')
-
+    parser.add_argument('--regression_C', type=float, default=1.0,
+                        help='C')
+    parser.add_argument('--regression_penalty', type=str, default='l1',
+                        help='penalty')
+    parser.add_argument('--regression_solver', type=str, default='liblinear',
+                        help='solver')
     args = parser.parse_args()
 
     return args
 
+def select_first_file(path):
+    """Selects first file in folder, use under assumption there is only one file in folder
+    Args:
+        path (str): path to directory or file to choose
+    Returns:
+        str: full path of selected file
+    """
+    files = os.listdir(path)
+    for file in files:
+        if file.endswith('.csv'):
+            return os.path.join(path, file)
+
 def main(args):
-    '''Read train dataset, train model, save trained model'''
+    """Main function of the script."""
 
-    # Read train data
-    train_data = pd.read_parquet(Path(args.train_data))
+    # paths are mounted as folder, therefore, we are selecting the file from folder
+    train_df = pd.read_csv(select_first_file(args.train_data))
+    # Extracting the label column
+    y_train = train_df.pop("is_bug_inc")
+    # convert the dataframe values to array
+    X_train = train_df.values
 
-    # Split the data into input(X) and output(y)
-    y_train = train_data[TARGET_COL]
-    X_train = train_data[NUMERIC_COLS + CAT_NOM_COLS + CAT_ORD_COLS]
+    print(f"Training with data of shape {X_train.shape}")
 
-    # Train a Random Forest Regression Model with the training set
-    model = RandomForestRegressor(n_estimators = args.regressor__n_estimators,
-                                  bootstrap = args.regressor__bootstrap,
-                                  max_depth = args.regressor__max_depth,
-                                  max_features = args.regressor__max_features,
-                                  min_samples_leaf = args.regressor__min_samples_leaf,
-                                  min_samples_split = args.regressor__min_samples_split,
-                                  random_state=0)
+    clf = LogisticRegression(C=args.regression_C, penalty=args.regression_penalty, solver=args.regression_solver)
+    mlflow.log_param("C", args.regression_C)
+    mlflow.log_param("penalty", args.regression_penalty)
+    mlflow.log_param("solver", args.regression_solver)
 
-    # log model hyperparameters
-    mlflow.log_param("model", "RandomForestRegressor")
-    mlflow.log_param("n_estimators", args.regressor__n_estimators)
-    mlflow.log_param("bootstrap", args.regressor__bootstrap)
-    mlflow.log_param("max_depth", args.regressor__max_depth)
-    mlflow.log_param("max_features", args.regressor__max_features)
-    mlflow.log_param("min_samples_leaf", args.regressor__min_samples_leaf)
-    mlflow.log_param("min_samples_split", args.regressor__min_samples_split)
+    clf.fit(X_train, y_train)
 
-    # Train model with the train set
-    model.fit(X_train, y_train)
+    y_pred = clf.predict(X_train)
+    fpr, tpr, thresholds = metrics.roc_curve(y_train, y_pred)
+    precision = metrics.precision_score(y_train, y_pred)
+    recall = metrics.recall_score(y_train, y_pred)
+    f1 = metrics.f1_score(y_train, y_pred)
+    auc = metrics.auc(fpr, tpr)
+    print(precision, recall, f1, auc)
 
-    # Predict using the Regression Model
-    yhat_train = model.predict(X_train)
-
-    # Evaluate Regression performance with the train set
-    r2 = r2_score(y_train, yhat_train)
-    mse = mean_squared_error(y_train, yhat_train)
-    rmse = np.sqrt(mse)
-    mae = mean_absolute_error(y_train, yhat_train)
-    
-    # log model performance metrics
-    mlflow.log_metric("train r2", r2)
-    mlflow.log_metric("train mse", mse)
-    mlflow.log_metric("train rmse", rmse)
-    mlflow.log_metric("train mae", mae)
-
-    # Visualize results
-    plt.scatter(y_train, yhat_train,  color='black')
-    plt.plot(y_train, y_train, color='blue', linewidth=3)
-    plt.xlabel("Real value")
-    plt.ylabel("Predicted value")
-    plt.savefig("regression_results.png")
-    mlflow.log_artifact("regression_results.png")
+    mlflow.log_metric("train precision", precision)
+    mlflow.log_metric("train recall", recall)
+    mlflow.log_metric("train f1", f1)
+    mlflow.log_metric("train auc", auc)
 
     # Save the model
-    mlflow.sklearn.save_model(sk_model=model, path=args.model_output)
-
+    mlflow.sklearn.save_model(sk_model=clf, path=args.model_output)
 
 if __name__ == "__main__":
     
@@ -145,12 +89,9 @@ if __name__ == "__main__":
     lines = [
         f"Train dataset input path: {args.train_data}",
         f"Model output path: {args.model_output}",
-        f"n_estimators: {args.regressor__n_estimators}",
-        f"bootstrap: {args.regressor__bootstrap}",
-        f"max_depth: {args.regressor__max_depth}",
-        f"max_features: {args.regressor__max_features}",
-        f"min_samples_leaf: {args.regressor__min_samples_leaf}",
-        f"min_samples_split: {args.regressor__min_samples_split}"
+        f"C: {args.regression_C}",
+        f"penalty: {args.regression_penalty}",
+        f"solver: {args.regression_solver}"
     ]
 
     for line in lines:

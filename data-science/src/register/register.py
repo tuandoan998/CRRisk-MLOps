@@ -30,12 +30,12 @@ def parse_args():
 
 def main(args):
     '''Loads model, registers it if deply flag is True'''
-
+    
     with open((Path(args.evaluation_output) / "deploy_flag"), 'rb') as infile:
         deploy_flag = int(infile.read())
-        
+
     mlflow.log_metric("deploy flag", int(deploy_flag))
-    deploy_flag=1
+    
     if deploy_flag==1:
 
         print("Registering ", args.model_name)
